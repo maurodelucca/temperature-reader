@@ -2,8 +2,8 @@
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
-#include <Wire.h>
-#include <OLED.h>
+#include <brzo_i2c.h> // Only needed for Arduino 1.6.5 and earlier
+#include <SSD1306Brzo.h>
 #include <DHT.h>
 #include <ThingSpeak.h>
 #include "temperature_reader_private.h"
@@ -11,10 +11,8 @@
 // ThingSpeak variables
 unsigned long lastUpdate = 0;
 
-// Declare OLED display
-// display(SDA, SCL);
-// SDA and SCL are the GPIO pins of ESP8266 that are connected to respective pins of display.
-OLED display(9, 10);
+// Initialize the OLED display using brzo_i2c
+SSD1306Brzo display(0x3c, 9, 10);
 
 // Starting dht sensor
 DHT dht(D4, DHT11);
@@ -25,19 +23,25 @@ WiFiClient  client;
 void setup() {
 
   //********** OLED Display ************
-  // Initialize display
-  display.begin();
+  // Initialising the UI will init the display too.
+  display.init();
+  display.flipScreenVertically();
+  display.setFont(ArialMT_Plain_10);
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
   
   Serial.begin(115200);
-  Serial.println("Booting");
-  display.print("Booting...");
+  Serial.println("Booting...");
+  
+  display.drawString(0, 0, "Booting...");
+  display.display();
 
   //************** Arduino OTA **********
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
-    display.print("Connection Failed! Rebooting...");
+    display.drawString(0, 10, "Connection Failed! Rebooting...");
+    display.display();
     delay(5000);
     ESP.restart();
   }
@@ -53,42 +57,56 @@ void setup() {
 
   ArduinoOTA.onStart([]() {
     Serial.println("Start");
-    display.clear();
-    display.print("Starting OTA...");
   });
+  
   ArduinoOTA.onEnd([]() {
     Serial.println("\nEnd");
-    display.print("Done", 4);
   });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    char buf[40];
-    sprintf(buf, "Progress: %u%%", (progress / (total / 100)));
-    Serial.println(buf);
-    display.print(buf, 2);
+  
+  ArduinoOTA.onProgress([](unsigned int prog, unsigned int total) {
+    int progress = (double(prog) / double(total)) * 100;
+
+    display.clear();
+    display.setFont(ArialMT_Plain_10);
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    display.drawString(0, 0, "Updating OTA...");
+    
+    // draw the progress bar
+    display.drawProgressBar(0, 32, 120, 10, progress);
+  
+    // draw the percentage as String
+    display.setTextAlignment(TEXT_ALIGN_CENTER);
+    display.drawString(64, 15, String(progress) + "%");
+    display.display();
   });
+  
   ArduinoOTA.onError([](ota_error_t error) {
     char buf[40];
     sprintf(buf, "Error[%u]: ", error);
     Serial.println(buf);
-    display.print(buf, 3);
     
     if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
     else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
     else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
     else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
     else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    
+    display.drawString(0, 50, buf);
+    display.display();
   });
+  
   ArduinoOTA.begin();
   Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  display.print("Ready", 1);
-  display.print("IP address:", 2);
+  display.drawString(0, 10, "Ready");
+  
   char buf[128];
   IPAddress myIp = WiFi.localIP();
-  sprintf(buf, "%d.%d.%d.%d", myIp[0], myIp[1], myIp[2], myIp[3]);
-  display.print(buf, 3);
+  sprintf(buf, "IP: %d.%d.%d.%d", myIp[0], myIp[1], myIp[2], myIp[3]);
+  display.drawString(0, 20, buf);
+  display.display();
 
   //***************** DHT Sensor *****************
   dht.begin();
@@ -99,13 +117,14 @@ void setup() {
   digitalWrite(1, LOW);
 
   // Clearing screen before starting
-  delay(5000);
+  delay(3000);
   display.clear();
 }
 
 void loop() {
   ArduinoOTA.handle();
 
+  //********* Collect results **********
   float h = 0;
   float t = 0;
   float hindex = 0;
@@ -122,39 +141,65 @@ void loop() {
 
   long rssi = WiFi.RSSI();
 
+  //********* Print results **********
+  display.clear();
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.setFont(ArialMT_Plain_16);
+
   char float_temp[6];
   char buf[48];
   
   dtostrf(h, 2, 0, float_temp);
-  sprintf(buf, "Humedad:    %s", float_temp);
+  sprintf(buf, "Humedad: %s", float_temp);
   Serial.println(buf);
-  display.print(buf);
+
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 0, "Humedad:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(128, 0, float_temp);
 
   dtostrf(t, 2, 0, float_temp);
-  sprintf(buf, "Temp:       %s C", float_temp);
+  sprintf(buf, "Temp: %s C", float_temp);
   Serial.println(buf);
-  display.print(buf, 1);
+
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 16, "Temp:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(128, 16, float_temp);
 
   dtostrf(hindex, 2, 0, float_temp);
-  sprintf(buf, "Index Heat: %s C", float_temp);
+  sprintf(buf, "Idx Heat: %s C", float_temp);
   Serial.println(buf);
-  display.print(buf, 2);
 
-  sprintf(buf, "RSSI:      %ld", rssi);
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 32, "Idx Heat:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(128, 32, float_temp);
+
+  sprintf(buf, "RSSI: %ld", rssi);
   Serial.println(buf);
-  display.print(buf, 3);
 
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 48, "RSSI:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(128, 48, float_temp);
+
+  display.display();
+
+  //********* Publish results **********
   int lightRaw = 0;
   unsigned long currTime = millis();
-  
+
+  /* TODO: Convert to bar at the top
   sprintf(buf, "%ld", lastUpdate + (5 * 60 * 1000));
   Serial.println(buf);
   display.print(buf, 4);
   sprintf(buf, "%ld", currTime);
   Serial.println(buf);
   display.print(buf, 5);
+  */
   
-  if(currTime - lastUpdate > (5 * 60 * 1000) || lastUpdate == 0) {
+  if(currTime - lastUpdate > (5 * 60 * 1000) || lastUpdate == 0 || currTime < lastUpdate) {
     ThingSpeak.setField(1, lightRaw);
     ThingSpeak.setField(2, t);
     ThingSpeak.setField(3, h);
