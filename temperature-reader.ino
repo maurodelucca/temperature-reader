@@ -83,16 +83,20 @@ void setup() {
   });
   
   ArduinoOTA.onError([](ota_error_t error) {
-    char buf[40];
-    sprintf(buf, "Error[%u]: ", error);
+    char buf[64];
+    char *bufp = buf;
+    bufp += sprintf(buf, "Error[%u]: ", error);
+    
+    if (error == OTA_AUTH_ERROR) sprintf(bufp, "Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) sprintf(bufp, "Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) sprintf(bufp, "Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) sprintf(bufp, "Receive Failed");
+    else if (error == OTA_END_ERROR) sprintf(bufp, "End Failed");
+
     Serial.println(buf);
-    
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    
+
+    display.setFont(ArialMT_Plain_10);
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
     display.drawString(0, 50, buf);
     display.display();
   });
