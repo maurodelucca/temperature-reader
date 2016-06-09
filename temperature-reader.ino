@@ -8,6 +8,8 @@
 #include <ThingSpeak.h>
 #include "temperature_reader_private.h"
 
+#define PUBLISH_INTERVAL (5 * 60 * 1000)
+
 // ThingSpeak variables
 unsigned long lastUpdate = 0;
 
@@ -121,6 +123,78 @@ void setup() {
   display.clear();
 }
 
+void printResults(float h, float t, float hindex, long rssi) {
+  display.clear();
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.setFont(ArialMT_Plain_16);
+
+  char float_temp[6];
+  char buf[48];
+
+  dtostrf(t, 2, 0, float_temp);
+  sprintf(buf, "Temp: %s C", float_temp);
+  Serial.println(buf);
+
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 0, "Temp:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(125, 0, float_temp);
+  
+  dtostrf(h, 2, 0, float_temp);
+  sprintf(buf, "Humedad: %s", float_temp);
+  Serial.println(buf);
+
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 16, "Humedad:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(125, 16, float_temp);
+
+  dtostrf(hindex, 2, 0, float_temp);
+  sprintf(buf, "Idx Heat: %s C", float_temp);
+  Serial.println(buf);
+
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 32, "Idx Heat:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(125, 32, float_temp);
+
+  sprintf(buf, "RSSI: %ld", rssi);
+  Serial.println(buf);
+
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 48, "RSSI:");
+  display.setTextAlignment(TEXT_ALIGN_RIGHT);
+  display.drawString(125, 48, String(rssi));
+
+  unsigned long currTime = millis();
+  if(currTime > lastUpdate) {
+    int publishStatus = (((double)currTime - (double)lastUpdate) / (double) PUBLISH_INTERVAL) * 63.0;
+    display.drawLine(127, 0, 127, publishStatus);
+  }
+
+  display.display();
+}
+
+void publishResults(float h, float t, float hindex, long rssi) {
+  int lightRaw = 0;
+  unsigned long currTime = millis();
+  
+  if(currTime - lastUpdate > PUBLISH_INTERVAL || lastUpdate == 0 || currTime < lastUpdate) {
+    ThingSpeak.setField(1, lightRaw);
+    ThingSpeak.setField(2, t);
+    ThingSpeak.setField(3, h);
+    ThingSpeak.setField(4, hindex);
+    
+    ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+
+    lastUpdate = currTime;
+
+    digitalWrite(1, HIGH);
+    delay(200);
+    digitalWrite(1, LOW);
+  }
+}
+
 void loop() {
   ArduinoOTA.handle();
 
@@ -142,76 +216,9 @@ void loop() {
   long rssi = WiFi.RSSI();
 
   //********* Print results **********
-  display.clear();
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.setFont(ArialMT_Plain_16);
-
-  char float_temp[6];
-  char buf[48];
-  
-  dtostrf(h, 2, 0, float_temp);
-  sprintf(buf, "Humedad: %s", float_temp);
-  Serial.println(buf);
-
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 0, "Humedad:");
-  display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  display.drawString(128, 0, float_temp);
-
-  dtostrf(t, 2, 0, float_temp);
-  sprintf(buf, "Temp: %s C", float_temp);
-  Serial.println(buf);
-
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 16, "Temp:");
-  display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  display.drawString(128, 16, float_temp);
-
-  dtostrf(hindex, 2, 0, float_temp);
-  sprintf(buf, "Idx Heat: %s C", float_temp);
-  Serial.println(buf);
-
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 32, "Idx Heat:");
-  display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  display.drawString(128, 32, float_temp);
-
-  sprintf(buf, "RSSI: %ld", rssi);
-  Serial.println(buf);
-
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 48, "RSSI:");
-  display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  display.drawString(128, 48, float_temp);
-
-  display.display();
+  printResults(h, t, hindex, rssi);
 
   //********* Publish results **********
-  int lightRaw = 0;
-  unsigned long currTime = millis();
-
-  /* TODO: Convert to bar at the top
-  sprintf(buf, "%ld", lastUpdate + (5 * 60 * 1000));
-  Serial.println(buf);
-  display.print(buf, 4);
-  sprintf(buf, "%ld", currTime);
-  Serial.println(buf);
-  display.print(buf, 5);
-  */
-  
-  if(currTime - lastUpdate > (5 * 60 * 1000) || lastUpdate == 0 || currTime < lastUpdate) {
-    ThingSpeak.setField(1, lightRaw);
-    ThingSpeak.setField(2, t);
-    ThingSpeak.setField(3, h);
-    ThingSpeak.setField(4, hindex);
-    
-    ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
-
-    lastUpdate = currTime;
-
-    digitalWrite(1, HIGH);
-    delay(200);
-    digitalWrite(1, LOW);
-  }
+  publishResults(h, t, hindex, rssi);
 }
 
