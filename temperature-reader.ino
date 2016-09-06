@@ -6,21 +6,27 @@
 #include <SSD1306Brzo.h>
 #include <DHT.h>
 #include <ThingSpeak.h>
+#include <PubSubClient.h>
 #include "temperature_reader_private.h"
 
 #define PUBLISH_INTERVAL (5 * 60 * 1000)
 
 // ThingSpeak variables
 unsigned long lastUpdate = 0;
-
+                                                 
 // Initialize the OLED display using brzo_i2c
-SSD1306Brzo display(0x3c, 9, 10);
+// (SDA, SCL)
+SSD1306Brzo display(0x3c, pinScreenSDA, pinScreenSCL);
 
 // Starting dht sensor
-DHT dht(D4, DHT11);
+DHT dht(pinTempData, tempSensorType);
 
-// Wifi client for ThingSpeak
-WiFiClient  client;
+// Wifi client
+WiFiClient  wifiClient;
+
+// MQTT client
+byte mqttServer[] = { 192, 168, 11, 10 };//Hardcode of mosquitto server IP on local intranet connected computer.
+PubSubClient mqttClient(wifiClient);
 
 void setup() {
 
@@ -52,7 +58,9 @@ void setup() {
   // ArduinoOTA.setPort(8266);
 
   // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
+  char hostName[13];
+  sprintf(hostName, "myesp8266-%s", espID);
+  ArduinoOTA.setHostname(hostName);
 
   // No authentication by default
   // ArduinoOTA.setPassword((const char *)"123");
@@ -118,9 +126,11 @@ void setup() {
   dht.begin();
 
   //***************** ThingSpeak *****************
-  ThingSpeak.begin(client);
-  pinMode(1, OUTPUT);
-  digitalWrite(1, LOW);
+  ThingSpeak.begin(wifiClient);
+
+  //**************** MQTT ***********************
+  mqttClient.setServer(mqttServer, 1883);
+  mqttClient.setCallback(mqttCallback);
 
   // Clearing screen before starting
   delay(3000);
@@ -180,22 +190,36 @@ void printResults(float h, float t, float hindex, long rssi) {
 }
 
 void publishResults(float h, float t, float hindex, long rssi) {
-  int lightRaw = 0;
   unsigned long currTime = millis();
   
   if(currTime - lastUpdate > PUBLISH_INTERVAL || lastUpdate == 0 || currTime < lastUpdate) {
-    ThingSpeak.setField(1, lightRaw);
-    ThingSpeak.setField(2, t);
-    ThingSpeak.setField(3, h);
-    ThingSpeak.setField(4, hindex);
+    ThingSpeak.setField(1, t);
+    ThingSpeak.setField(2, h);
+    ThingSpeak.setField(3, hindex);
     
     ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
 
     lastUpdate = currTime;
+  }
 
-    digitalWrite(1, HIGH);
-    delay(200);
-    digitalWrite(1, LOW);
+  if(!mqttClient.connected()){
+    Serial.println("Connecting to MQTT server");
+
+    char clientName[17];
+    sprintf(clientName, "esp8266Client-%s", espID);
+    
+    mqttClient.connect(clientName);
+  }
+  
+  char buffer[8];
+  dtostrf(t, 2, 0, buffer);
+  char queueName[7];
+  sprintf(queueName, "esp_%s/temp", espID);
+  
+  if(mqttClient.publish(queueName, buffer)){
+    Serial.println("mqtt publish ok");
+  } else {
+    Serial.println("mqtt publish failed");
   }
 }
 
@@ -224,5 +248,25 @@ void loop() {
 
   //********* Publish results **********
   publishResults(h, t, hindex, rssi);
+}
+
+//----------------------------------------------------------------------------
+// Callback payload parsing inspired from code found at http://blue-pc.net
+//----------------------------------------------------------------------------
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  int i = 0;
+  char message_buff[100];
+  
+  for(i=0; i<length; i++) {
+  message_buff[i] = payload[i];
+  }
+  message_buff[i] = '\0';
+  
+  String msgString = String(message_buff);
+  
+  Serial.print("topic: ");
+  Serial.println(String(topic));
+  Serial.print("payload: ");
+  Serial.println(String(msgString));
 }
 
